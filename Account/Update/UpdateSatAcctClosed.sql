@@ -14,3 +14,15 @@ Sat_Account_Closed B
 ON A.HUB_ACCT_SQN = B.HUB_ACCT_SQN
 WHERE B.HUB_ACCT_SQN IS NULL) D
 ON C.ACCOUNTNUMBER = D.ACCT_NUM;
+
+/*
+
+	To update the closedate of those Accounts which are closed.
+*/
+
+UPDATE sym_vault1.Sat_Account_Closed A
+	INNER JOIN sym_vault1.Hub_Account B
+		ON A.HUB_ACCT_SQN = B.HUB_ACCT_SQN
+	INNER JOIN SYM.ACCOUNT C
+		ON B.ACCT_NUM = C.ACCOUNTNUMBER
+SET END_DATE = IF(C.CLOSEDATE <> '0000-00-00', C.CLOSEDATE, null);

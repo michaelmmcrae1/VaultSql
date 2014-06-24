@@ -4,7 +4,8 @@
 
 	Joins Hub_Person, NAME, and Hub_Address to find address associated with an SSN.
 
-	NOTE - This update script takes 100+ seconds... WAY MORE than other Link Update scripts (~4 seconds). Not sure why.
+	NOTE - This update script takes 120+ seconds to complete... WAY MORE than other Link Update
+	scripts (~4.5 seconds). Not sure why.
 
 */
 
