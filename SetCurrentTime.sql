@@ -1,0 +1,1 @@
+SET @currentTime = now();
