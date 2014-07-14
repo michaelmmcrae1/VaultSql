@@ -1,9 +1,10 @@
 delimiter $$
 
-CREATE EVENT sym_vault1.EVENT_UpdateSymVault1FromSYM
+CREATE EVENT sym_vault1.EVENT01_UpdateSymVault1FromSYM
 	ON SCHEDULE
 		EVERY 1 DAY
-		STARTS '2014-07-04 07:00:00'
+		STARTS '2014-07-09 06:15:00'
+		ON COMPLETION PRESERVE
 DO
 BEGIN
 /*
@@ -70,8 +71,8 @@ UPDATE sym_vault1.Sat_Account_Closed A
 		ON A.ACCT_SQN = B.HUB_ACCT_SQN
 	JOIN SYM.ACCOUNT C
 		ON B.ACCT_NUM = C.ACCOUNTNUMBER
-SET END_DATE = IF(A.BRANCH <> C.BRANCH, NOW(), null)
-WHERE C.BRANCH <> A.BRANCH AND END_DATE IS NULL;
+SET A.END_DATE = NOW()
+WHERE C.BRANCH <> A.BRANCH AND A.END_DATE IS NULL;
 
 /*
 	To update the closedate of those Accounts which are closed.
@@ -81,8 +82,8 @@ UPDATE sym_vault1.Sat_Account_Closed A
 		ON A.ACCT_SQN = B.HUB_ACCT_SQN
 	INNER JOIN SYM.ACCOUNT C
 		ON B.ACCT_NUM = C.ACCOUNTNUMBER
-SET END_DATE = IF(C.CLOSEDATE <> '0000-00-00', C.CLOSEDATE, null)
-WHERE A.END_DATE IS NULL;
+SET END_DATE = C.CLOSEDATE
+WHERE C.CLOSEDATE <> '0000-00-00' AND A.END_DATE IS NULL;
 
 
 /*
@@ -94,7 +95,8 @@ WHERE A.END_DATE IS NULL;
 	Joins Hub_Account, SYM.NAME to find unique (DISTINCTROW) addresses of accounts that are still open.
 	Left Joins with Hub_Address to find Addresses not already in Hub_Address, and inserts them.
 
-	NOTE - Selects blank address as a unique address as well.
+	NOTE - Does not select an address if it is all blank i.e. at least one of STREET,CITY,STATE,ZIPCODE must
+		contain some characters
 */
 INSERT INTO sym_vault1.Hub_Address(STREET, CITY, STATE, ZIPCODE, HUB_ADDRESS_RSRC)
 SELECT DISTINCTROW A.STREET, A.CITY, A.STATE, A.ZIPCODE, 'EASE' AS HUB_ADDRESS_RSRC
@@ -103,8 +105,9 @@ FROM SYM.NAME A
 		ON A.PARENTACCOUNT = B.ACCT_NUM
 	LEFT JOIN sym_vault1.Hub_Address C
 		ON A.STREET = C.STREET AND A.CITY = C.CITY AND A.STATE = C.STATE AND A.ZIPCODE = C.ZIPCODE
-WHERE C.STREET IS NULL AND C.CITY IS NULL AND C.STATE IS NULL AND C.ZIPCODE IS NULL AND A.ORDINAL = 0;
--- (A.STREET <> '' OR A.CITY <> '' OR A.STATE <> '' OR A.ZIPCODE <> '')
+WHERE C.STREET IS NULL AND C.CITY IS NULL AND C.STATE IS NULL AND C.ZIPCODE IS NULL AND A.ORDINAL = 0
+		AND (A.STREET <> '' OR A.CITY <> '' OR A.STATE <> '' OR A.ZIPCODE <> '')
+		AND !(A.STREET = '1900 52ND AVENUE' AND A.CITY = 'MOLINE') AND !(A.STREET = '1900 52ND AVE' AND A.CITY = 'MOLINE');
 	
 
 /*
@@ -213,182 +216,6 @@ FROM sym_vault1.Hub_Person A
 	LEFT JOIN sym_vault1.Link_Addr_Person D
 		ON C.HUB_ADDRESS_SQN = D.ADDR_SQN AND A.HUB_PERSON_SQN = D.PERSON_SQN
 WHERE D.ADDR_SQN IS NULL AND D.PERSON_SQN IS NULL;
-		
-
-/*
-	UpdateShareTransaction.sql
-
-	Michael McRae
-	July 1, 2014
-
-	From the SYM dump, SYM.SAVINGSTRANSACTION contains all transaction in the past day. I take the primary
-	key from that table and load it into Hub_Share_Transaction. Each day, they should all be unique - it only
-	sends new ones that happened the day before.
-	
-	I still do a left join to make sure I'm not adding the same ones twice in the same day -- if I make a mistake
-	and run the script twice. Could be removed in the future if this script is automated and guaranteed to only run once in a day.
-
-	This only takes records with a 0 COMMENTCODE because I don't want to keep the Comments associated with transactions in
-	Hub_Share_Transaction - those comments may go into a Hub_ShareT_Comment
-*/
-INSERT INTO sym_vault1.Hub_Share_Transaction(PARENT_ACCT, SHARE_ID, SEQUENCE_NUM, POST_DATE)
-SELECT PARENTACCOUNT, PARENTID, SEQUENCENUMBER, POSTDATE
-FROM SYM.SAVINGSTRANSACTION A
-	LEFT JOIN sym_vault1.Hub_Share_Transaction B
-		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.SHARE_ID
-			AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND A.POSTDATE = B.POST_DATE
-WHERE A.COMMENTCODE = 0 AND B.PARENT_ACCT IS NULL AND B.SHARE_ID IS NULL
-	AND B.POST_DATE IS NULL;
-
-
-/*
-	UpdateLoanTransaction.sql
-
-	Michael McRae
-	July 1, 2014
-
-	From the SYM dump, SYM.LOANTRANSACTION contains all transaction in the past day. I take the primary
-	key from that table and load it into Hub_Loan_Transaction. Each day, they should all be unique - Symitar only
-	sends new ones that happened the day before.
-	
-	I still do a left join to make sure I'm not adding the same ones twice in the same day -- just in case I make a mistake
-	and run the script twice. Could be removed in the future if this script is automated and guaranteed to only run once in a day.
-
-	This only takes records with a 0 COMMENTCODE because I don't want to keep the Comments associated with transactions in
-	Hub_Loan_Transaction - those comments may go into a Hub_LoanT_Comment
-*/
-INSERT INTO sym_vault1.Hub_Loan_Transaction(PARENT_ACCT, LOAN_ID, SEQUENCE_NUM, POST_DATE)
-SELECT PARENTACCOUNT, PARENTID, SEQUENCENUMBER, POSTDATE
-FROM SYM.LOANTRANSACTION A
-	LEFT JOIN sym_vault1.Hub_Loan_Transaction B
-		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.LOAN_ID
-			AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND A.POSTDATE = B.POST_DATE
-WHERE A.COMMENTCODE = 0 AND B.PARENT_ACCT IS NULL AND B.LOAN_ID IS NULL
-	AND B.POST_DATE IS NULL;
-
-
-/*
-	UpdateHubLoan.sql
-
-	Michael Mcrae
-	July 1, 2014
-
-	Joins Hub_Account with SYM.LOAN to only look at those loans for accounts already in Data Warehouse.
-	Takes Loan info (PARENTACCOUNT,ID) from SYM.LOAN not already in Hub_Loan and inserts
-	it into Hub_Loan.
-*/
-INSERT INTO sym_vault1.Hub_Loan(PARENT_ACCT, LOAN_ID, HUB_LOAN_RSRC)
-SELECT PARENTACCOUNT, ID, 'EASE' AS HUB_LOAN_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN SYM.LOAN B
-		ON A.ACCT_NUM = B.PARENTACCOUNT
-	LEFT JOIN sym_vault1.Hub_Loan C
-		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.ID = C.LOAN_ID
-WHERE C.PARENT_ACCT IS NULL AND C.LOAN_ID IS NULL;
-
-
-/*
-	UpdateHubShare.sql
-
-	Michael McRae
-	July 1, 2014
-
-	Joins SYM.SAVINGS with Hub_Account to only get shares connected with accounts
-	currently in Data Warehouse. Inserts PARENTACCOUNT,ID of shares into Hub_Share which
-	are not already in the table.
-*/
-INSERT INTO sym_vault1.Hub_Share(PARENT_ACCT, SHARE_ID, HUB_SHARE_RSRC)
-SELECT PARENTACCOUNT, ID, 'EASE' AS HUB_LOAN_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN SYM.SAVINGS B
-		ON A.ACCT_NUM = B.PARENTACCOUNT
-	LEFT JOIN sym_vault1.Hub_Share C
-		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.ID = C.SHARE_ID
-WHERE C.PARENT_ACCT IS NULL AND C.SHARE_ID IS NULL;
-
-
-/*
-	UpdateLinkAcctLoan_WORKING.sql
-
-	Michael McRae
-	June 23, 2014
-
-	Joins Hub_Loan to Hub_Account on ACCT_NUM with PARENT_ACCT to connect Acct# with
-	Loan identifier (PARENT_ACCT,LOAN_ID). 
-	Left joins with Link_Acct_Loan to only add those not already in.
-
-*/
-INSERT INTO sym_vault1.Link_Acct_Loan(ACCT_SQN, LOAN_SQN, LINK_ACCT_LOAN_RSRC)
-SELECT A.HUB_ACCT_SQN, B.HUB_LOAN_SQN, 'EASE' AS LINK_ACCT_LOAN_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN sym_vault1.Hub_Loan B
-		ON A.ACCT_NUM = B.PARENT_ACCT
-	LEFT JOIN sym_vault1.Link_Acct_Loan C
-		ON A.HUB_ACCT_SQN = C.ACCT_SQN AND B.HUB_LOAN_SQN = C.LOAN_SQN
-WHERE C.ACCT_SQN IS NULL AND C.LOAN_SQN IS NULL;
-
-
-/*
-	UpdateLinkAcctShare.sql
-
-	Michael Mcrae
-	July 1, 2014
-
-	Joins Hub_Account and Hub_Share with ACCT_NUM = PARENT_ACCT to connect an account with a share.
-	Left joins with Link_Acct_Share to only insert those not already in the table.
-*/
-INSERT INTO sym_vault1.Link_Acct_Share(ACCT_SQN, SHARE_SQN, LINK_ACCT_SHARE_RSRC)
-SELECT A.HUB_ACCT_SQN, B.HUB_SHARE_SQN, 'EASE' AS LINK_ACCT_SHARE_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN sym_vault1.Hub_Share B
-		ON A.ACCT_NUM = B.PARENT_ACCT
-	LEFT JOIN sym_vault1.Link_Acct_Share C
-		ON A.HUB_ACCT_SQN = C.ACCT_SQN AND B.HUB_SHARE_SQN = C.SHARE_SQN
-WHERE C.ACCT_SQN IS NULL AND C.SHARE_SQN IS NULL;
-
-
-/*
-	UpdateLinkAcctLoanLoanT.sql
-
-	Michael McRae
-	July 1, 2014
-
-	This is a 3-way link between Account,Loan, and Loan_Transaction. One way to view it: Given an Account, this will
-	will show all Loans for that account, and all Loan transactions for each loan on that account.
-*/
-INSERT INTO sym_vault1.Link_Acct_Loan_LoanT(ACCT_SQN, LOAN_SQN, LOANT_SQN, LINK_ACCT_LOAN_LOANT_RSRC)
-SELECT A.HUB_ACCT_SQN, B.HUB_LOAN_SQN, C.HUB_LOAN_TRANSACTION_SQN, 'EASE' AS LINK_ACCT_LOAN_LOANT_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN sym_vault1.Hub_Loan B
-		ON A.ACCT_NUM = B.PARENT_ACCT
-	JOIN sym_vault1.Hub_Loan_Transaction C
-		ON B.PARENT_ACCT = C.PARENT_ACCT AND B.LOAN_ID = C.LOAN_ID
-	LEFT JOIN sym_vault1.Link_Acct_Loan_LoanT D
-		ON A.HUB_ACCT_SQN = D.ACCT_SQN AND B.HUB_LOAN_SQN = D.LOAN_SQN
-			AND C.HUB_LOAN_TRANSACTION_SQN = D.LOANT_SQN
-WHERE D.ACCT_SQN IS NULL AND D.LOAN_SQN IS NULL AND D.LOANT_SQN IS NULL;
-
-
-/*
-	UpdateLinkAcctShareShareT.sql
-
-	Michael McRae
-	July 1, 2014
-
-	This is a 3-way link between Account,Share, and Share_Transaction. One way to view it: Given an Account, this will
-	will show all Shares for that account, and all Share transactions for each loan on that account.
-*/
-INSERT INTO sym_vault1.Link_Acct_Share_ShareT(ACCT_SQN, SHARE_SQN, SHARET_SQN, LINK_ACCT_SHARE_SHARET_RSRC)
-SELECT A.HUB_ACCT_SQN, B.HUB_SHARE_SQN, C.HUB_SHARE_TRANSACTION_SQN, 'EASE' AS LINK_ACCT_SHARE_SHARET_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN sym_vault1.Hub_Share B
-		ON A.ACCT_NUM = B.PARENT_ACCT
-	JOIN sym_vault1.Hub_Share_Transaction C
-		ON B.PARENT_ACCT = C.PARENT_ACCT AND B.SHARE_ID = C.SHARE_ID
-	LEFT JOIN sym_vault1.Link_Acct_Share_ShareT D
-		ON A.HUB_ACCT_SQN = D.ACCT_SQN AND B.HUB_SHARE_SQN = D.SHARE_SQN
-			AND C.HUB_SHARE_TRANSACTION_SQN = D.SHARET_SQN
-WHERE D.ACCT_SQN IS NULL AND D.SHARE_SQN IS NULL AND D.SHARET_SQN IS NULL;
 
 
 /*
@@ -408,8 +235,7 @@ FROM sym_vault1.Hub_Account A
 		ON A.ACCT_NUM = B.PARENTACCOUNT
 	LEFT JOIN sym_vault1.Hub_Product_Instance C
 		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.ID = C.ID AND CATEGORY = 'S'
-WHERE C.PARENT_ACCT IS NULL AND C.ID IS NULL AND C.CATEGORY IS NULL
-		AND B.CLOSEDATE = '0000-00-00';
+WHERE C.PARENT_ACCT IS NULL AND C.ID IS NULL AND C.CATEGORY IS NULL;
 
 
 /*
@@ -429,8 +255,29 @@ FROM sym_vault1.Hub_Account A
 		ON A.ACCT_NUM = B.PARENTACCOUNT
 	LEFT JOIN sym_vault1.Hub_Product_Instance C
 		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.ID = C.ID AND C.CATEGORY = 'L'
-WHERE C.PARENT_ACCT IS NULL AND C.ID IS NULL AND C.CATEGORY IS NULL
-		AND B.CLOSEDATE = '0000-00-00';
+WHERE C.PARENT_ACCT IS NULL AND C.ID IS NULL AND C.CATEGORY IS NULL;
+
+
+/*
+	UpdateLinkAddrProductInstance.sql
+
+	Michael McRae
+	July 9, 2014
+
+	Joins Hub_Product_Instance with SYM.NAME on Parent Account. Joins with Hub_Address to only get addresses which
+	are not blank and to connect HUB_ADDR_SQN to HUB_PRODUCTINSTANCE_SQN. Only look at a record in SYM.NAME with ORDINAL=0,
+	so we only look at addresses of primary account holder.
+*/
+INSERT INTO sym_vault1.Link_Addr_ProductInstance(ADDR_SQN, PRODUCTINSTANCE_SQN, LINK_ADDR_PRODUCTINSTANCE_RSRC)
+SELECT C.HUB_ADDRESS_SQN, A.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_ADDR_PRODUCTINSTANCE_RSRC
+FROM sym_vault1.Hub_Product_Instance A
+	JOIN SYM.NAME B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND B.ORDINAL = 0
+	JOIN sym_vault1.Hub_Address C
+		ON B.STREET = C.STREET AND B.CITY = C.CITY AND B.STATE = C.STATE AND B.ZIPCODE = C.ZIPCODE
+	LEFT JOIN sym_vault1.Link_Addr_ProductInstance D
+		ON C.HUB_ADDRESS_SQN = D.ADDR_SQN AND A.HUB_PRODUCT_INSTANCE_SQN = D.PRODUCTINSTANCE_SQN
+WHERE D.ADDR_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
 
 
 /*
@@ -476,53 +323,6 @@ WHERE D.PRODUCT_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
 
 
 /*
-	UpdateLinkPersonProductInstance_SHARE.sql
-
-	Michael McRae
-	July 7, 2014
-
-	Updates Link_Person_ProductInstance from SYM.SAVINGSNAME. Connects Share Product instances with a Person.
-	This script only connects non-primary members to the Share, it does not also connect the primary account
-	holder's SSN to the share.
-
-	Currently, this is connecting beneficiaries, any/all types of connection to a share. Maybe it should only be
-	connecting certain kinds of connected people? (i.e. joint, spouse, etc.)
-*/
-INSERT INTO sym_vault1.Link_Person_ProductInstance(PERSON_SQN, PRODUCTINSTANCE_SQN, LINK_PERSON_PRODUCTINSTANCE_RSRC)
-SELECT A.HUB_PERSON_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
-FROM sym_vault1.Hub_Person A
-	JOIN SYM.SAVINGSNAME B
-		ON A.SSN = B.SSN
-	JOIN sym_vault1.Hub_Product_Instance C
-		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.PARENTID = C.ID AND C.CATEGORY = 'S'
-	LEFT JOIN Link_Person_ProductInstance D
-		ON A.HUB_PERSON_SQN = D.PERSON_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = D.PRODUCTINSTANCE_SQN
-WHERE D.PERSON_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
-
-
-/*
-	UpdateLinkPersonProductInstance_LOAN.sql
-
-	Michael McRae
-	July 7, 2014
-
-	Updates Link_Person_ProductInstance from SYM.LOANNAME. Connects Loan Product instances with a Person.
-	This script only connects non-primary members to the Loan, it does not also connect the primary account
-	holder's SSN to the loan.
-*/
-INSERT INTO sym_vault1.Link_Person_ProductInstance(PERSON_SQN, PRODUCTINSTANCE_SQN, LINK_PERSON_PRODUCTINSTANCE_RSRC)
-SELECT A.HUB_PERSON_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
-FROM sym_vault1.Hub_Person A
-	JOIN SYM.LOANNAME B
-		ON A.SSN = B.SSN
-	JOIN sym_vault1.Hub_Product_Instance C
-		ON B.PARENTACCOUNT = C.PARENT_ACCT AND B.PARENTID = C.ID AND C.CATEGORY = 'L'
-	LEFT JOIN Link_Person_ProductInstance D
-		ON A.HUB_PERSON_SQN = D.PERSON_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = D.PRODUCTINSTANCE_SQN
-WHERE D.PERSON_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
-
-
-/*
 	UpdateLinkPersonProductInstance_PRIMARY.sql
 
 	Michael McRae
@@ -530,6 +330,9 @@ WHERE D.PERSON_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
 
 	Updates Link_Person_ProductInstance from Primary Account holders. Connects Loan Product instances with a Person.
 	This script only connects primary members to a product.
+
+	Matches ProductInstance to Account by PARENT_ACCT = PARENTACCOUNT, only with ORDINAL=0 [primary account holder in SYM.NAME]
+	Connects the SSN of that PARENTACCOUNT to the ProductInstance
 
 	Takes ~20 seconds ...
 */
@@ -539,12 +342,488 @@ FROM SYM.NAME A
 	JOIN sym_vault1.Hub_Person B
 		ON A.SSN = B.SSN
 	JOIN sym_vault1.Hub_Product_Instance C
-		ON A.PARENTACCOUNT = C.PARENT_ACCT
-	JOIN SYM.ACCOUNT D
-		ON A.PARENTACCOUNT = D.ACCOUNTNUMBER
+		ON A.PARENTACCOUNT = C.PARENT_ACCT AND A.ORDINAL = 0
+	JOIN sym_vault1.Hub_Account D
+		ON A.PARENTACCOUNT = D.ACCT_NUM
 	LEFT JOIN sym_vault1.Link_Person_ProductInstance F
 		ON B.HUB_PERSON_SQN = F.PERSON_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = F.PRODUCTINSTANCE_SQN
-WHERE A.ORDINAL = 0 AND D.CLOSEDATE = '0000-00-00' AND F.PERSON_SQN IS NULL AND F.PRODUCTINSTANCE_SQN IS NULL;
+WHERE F.PERSON_SQN IS NULL AND F.PRODUCTINSTANCE_SQN IS NULL;
+
+
+/*
+	UpdateHubTransaction_LOAN.sql
+
+	Michael McRae
+	July 8, 2014
+
+	Assumes LoanTransaction only gets new transactions(deltas) [what if it is null... need something for that]. Loads
+	The primary key of a unique LoanTransaction, and 'L' into Hub_Transaction. Left joins so it only adds those
+	not already in Hub_Transaction.
+*/
+INSERT INTO sym_vault1.Hub_Transaction(PARENT_ACCT, ID, CATEGORY, SEQUENCE_NUM, POST_DATE, ACTIVITY_DATE, TELLER_NUM, CONSOLE_NUM, BRANCH, DESCRIPTION, ACTION_CODE, SOURCE_CODE,
+				BALANCE_CHANGE, INTEREST, NEW_BALANCE, HUB_TRANSACTION_RSRC)
+SELECT PARENTACCOUNT, PARENTID, 'L' AS CATEGORY, SEQUENCENUMBER, POSTDATE, ACTIVITYDATE, USERNUMBER, CONSOLENUMBER, A.BRANCH, A.DESCRIPTION, ACTIONCODE, SOURCECODE,
+				BALANCECHANGE, A.INTEREST, NEWBALANCE, 'EASE' AS HUB_TRANSACTION_RSRC
+FROM SYM.LOANTRANSACTION A
+	JOIN sym_vault1.Hub_Account C
+		ON A.PARENTACCOUNT = C.ACCT_NUM
+	LEFT JOIN sym_vault1.Hub_Transaction B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.ID AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND B.CATEGORY = 'L'
+WHERE B.PARENT_ACCT IS NULL AND B.ID IS NULL AND B.SEQUENCE_NUM IS NULL AND A.COMMENTCODE = 0;
+
+
+/*
+	UpdateHubTransaction_SHARE.sql
+
+	Michael McRae
+	July 8, 2014
+
+	Assumes SaingsTransaction only gets new transactions(deltas) [what if it is null... need something for that]. Loads
+	The primary key of a unique SAVINGSTRANSACTION, and 'S' into Hub_Transaction. Left joins so it only adds those
+	not already in Hub_Transaction.
+*/
+INSERT INTO sym_vault1.Hub_Transaction(PARENT_ACCT, ID, CATEGORY, SEQUENCE_NUM, POST_DATE, ACTIVITY_DATE, TELLER_NUM, CONSOLE_NUM, BRANCH, DESCRIPTION, ACTION_CODE, SOURCE_CODE,
+				BALANCE_CHANGE, INTEREST, NEW_BALANCE, HUB_TRANSACTION_RSRC)
+SELECT PARENTACCOUNT, PARENTID, 'S' AS CATEGORY, SEQUENCENUMBER, POSTDATE, ACTIVITYDATE, USERNUMBER, CONSOLENUMBER, A.BRANCH, A.DESCRIPTION, ACTIONCODE, SOURCECODE,
+				BALANCECHANGE, A.INTEREST, NEWBALANCE, 'EASE' AS HUB_TRANSACTION_RSRC
+FROM SYM.SAVINGSTRANSACTION A
+	JOIN sym_vault1.Hub_Account C
+		ON A.PARENTACCOUNT = C.ACCT_NUM
+	LEFT JOIN sym_vault1.Hub_Transaction B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.ID AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND B.CATEGORY = 'S'
+WHERE B.PARENT_ACCT IS NULL AND B.ID IS NULL AND B.SEQUENCE_NUM IS NULL AND A.COMMENTCODE = 0;
+
+
+/*
+	UpdateHubTeller.sql
+
+	Michael McRae
+	July 9, 2014
+
+	Finds USERNUMBER - which is our TELLER_NUM - from SYM.USERS and inserts those not already in Hub_Teller
+*/
+INSERT INTO sym_vault1.Hub_Teller(TELLER_NUM, HUB_TELLER_RSRC)
+SELECT A.USERNUMBER, 'EASE' AS HUB_TELLER_RSRC
+FROM SYM.USERS A
+	LEFT JOIN sym_vault1.Hub_Teller B
+		ON A.USERNUMBER = B.TELLER_NUM
+WHERE B.TELLER_NUM IS NULL;
+
+/*
+	Inserts Teller_SQN and Description associated with Teller_SQN into Sat_Teller_Description, if that Teller_SQN
+	is not already in the table
+*/
+INSERT INTO sym_vault1.Sat_Teller_Description(TELLER_SQN, DESCRIPTION)
+SELECT A.HUB_TELLER_SQN, B.NAME
+FROM sym_vault1.Hub_Teller A
+	JOIN SYM.USERS B
+		ON A.TELLER_NUM = B.USERNUMBER
+LEFT JOIN sym_vault1.Sat_Teller_Description C
+		ON A.HUB_TELLER_SQN = C.TELLER_SQN
+WHERE C.TELLER_SQN IS NULL;
+
+/*
+	Updates change of Description associated with already-added Teller_SQN in Sat_Teller_Description
+*/
+INSERT INTO sym_vault1.Sat_Teller_Description(TELLER_SQN, DESCRIPTION)
+SELECT C.TELLER_SQN, B.NAME
+FROM sym_vault1.Hub_Teller A
+	JOIN SYM.USERS B
+		ON A.TELLER_NUM = B.NUMBER
+	JOIN sym_vault1.Sat_Teller_Description C
+		ON A.HUB_TELLER_SQN = C.TELLER_SQN
+WHERE C.DESCRIPTION <> B.NAME AND C.END_DATE IS NULL;
+
+UPDATE sym_vault1.Sat_Teller_Description A
+	JOIN sym_vault1.Hub_Teller B
+		ON A.TELLER_SQN = B.HUB_TELLER_SQN
+	JOIN SYM.USERS C
+		ON B.TELLER_NUM = C.USERNUMBER
+SET A.END_DATE = NOW()
+WHERE A.DESCRIPTION <> C.NAME AND A.END_DATE IS NULL;
+
+
+/*
+	UpdateSatProductInstanceType.sql
+	
+	Michael McRae
+	July 11, 2014
+
+	Adds rows into Sat_ProductInstance_Type when there's a new ProductInstance in Hub_Product_Instance.
+	Adds new row when the Type changes of a PRODUCTINSTANCE_SQN.
+	Sets END_DATE to NOW() of previous row when the Type changes of PRODUCTINSTANCE_SQN
+*/
+-- Finds New LOAN ProductInstances and adds HUB_SQN and Type to Sat_ProductInstance_Type
+INSERT INTO sym_vault1.Sat_ProductInstance_Type(PRODUCTINSTANCE_SQN, TYPE)
+SELECT B.HUB_PRODUCT_INSTANCE_SQN, A.TYPE
+FROM SYM.LOAN A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.ID = B.ID AND B.CATEGORY = 'L'
+	LEFT JOIN sym_vault1.Sat_ProductInstance_Type C
+		ON B.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE C.PRODUCTINSTANCE_SQN IS NULL;
+-- For SYM.SAVINGS
+INSERT INTO sym_vault1.Sat_ProductInstance_Type(PRODUCTINSTANCE_SQN, TYPE)
+SELECT B.HUB_PRODUCT_INSTANCE_SQN, A.TYPE
+FROM SYM.SAVINGS A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.ID = B.ID AND B.CATEGORY = 'S'
+	LEFT JOIN sym_vault1.Sat_ProductInstance_Type C
+		ON B.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE C.PRODUCTINSTANCE_SQN IS NULL;
+/*
+	Add new row to Sat_ProductInstance_Type with updated TYPE when the TYPE in LOAN/SAVINGS is different from current
+	TYPE in Sat_ProductInstance_Type for the associated Hub_Product_Instance_SQN
+*/
+INSERT INTO sym_vault1.Sat_ProductInstance_Type(PRODUCTINSTANCE_SQN, TYPE)
+SELECT B.HUB_PRODUCT_INSTANCE_SQN, A.TYPE
+FROM SYM.LOAN A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.ID = B.ID AND B.CATEGORY = 'L'
+	JOIN sym_vault1.Sat_ProductInstance_Type C
+		ON B.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE A.TYPE <> C.TYPE AND C.END_DATE IS NULL;
+-- For SYM.SAVINGS
+INSERT INTO sym_vault1.Sat_ProductInstance_Type(PRODUCTINSTANCE_SQN, TYPE)
+SELECT B.HUB_PRODUCT_INSTANCE_SQN, A.TYPE
+FROM SYM.SAVINGS A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.ID = B.ID AND B.CATEGORY = 'S'
+	JOIN sym_vault1.Sat_ProductInstance_Type C
+		ON B.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE A.TYPE <> C.TYPE AND C.END_DATE IS NULL;
+/*
+	Set END_DATE = NOW() on row in Sat_ProductInstance_Type where TYPE has since changed
+*/
+UPDATE sym_vault1.Sat_ProductInstance_Type A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PRODUCTINSTANCE_SQN = B.HUB_PRODUCT_INSTANCE_SQN
+	JOIN SYM.LOAN C
+		ON B.PARENT_ACCT = C.PARENTACCOUNT AND B.ID = C.ID AND B.CATEGORY = 'L'
+SET A.END_DATE = NOW()
+WHERE A.TYPE <> C.TYPE AND A.END_DATE IS NULL;
+-- For SYM.SAVINGS
+UPDATE sym_vault1.Sat_ProductInstance_Type A
+	JOIN sym_vault1.Hub_Product_Instance B
+		ON A.PRODUCTINSTANCE_SQN = B.HUB_PRODUCT_INSTANCE_SQN
+	JOIN SYM.SAVINGS C
+		ON B.PARENT_ACCT = C.PARENTACCOUNT AND B.ID = C.ID AND B.CATEGORY = 'S'
+SET A.END_DATE = NOW()
+WHERE A.TYPE <> C.TYPE AND A.END_DATE IS NULL;
+
+
+/*
+	UpdateSatProductInstanceClosed.sql
+	
+	Michael McRae
+	July 11, 2014
+
+	Finds ProductInstance in SYM.LOAN which has CLOSEDATE <> '0000-00-00' i.e. has closed, and inserts the closedate
+	and associated HUB_PRODUCT_INSTANCE_SQN into Sat_ProductInstance_Closed. ProductInstance cannot be opened after it
+	is closed - so this is a one time thing. Either a ProductInstance_SQN is in the table -- and thus it is closed -- or
+	it is not in the table and thus it remains open.
+*/
+-- from SYM.LOAN
+INSERT INTO sym_vault1.Sat_ProductInstance_Closed(PRODUCTINSTANCE_SQN, CLOSE_DATE)
+SELECT A.HUB_PRODUCT_INSTANCE_SQN, B.CLOSEDATE
+FROM sym_vault1.Hub_Product_Instance A
+	JOIN SYM.LOAN B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ID = B.ID AND A.CATEGORY = 'L' AND B.CLOSEDATE <> '0000-00-00'
+	LEFT JOIN sym_vault1.Sat_ProductInstance_Closed C
+		ON A.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE C.PRODUCTINSTANCE_SQN IS NULL;
+-- from SYM.SAVINGS
+INSERT INTO sym_vault1.Sat_ProductInstance_Closed(PRODUCTINSTANCE_SQN, CLOSE_DATE)
+SELECT A.HUB_PRODUCT_INSTANCE_SQN, B.CLOSEDATE
+FROM sym_vault1.Hub_Product_Instance A
+	JOIN SYM.SAVINGS B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ID = B.ID AND A.CATEGORY = 'S' AND B.CLOSEDATE <> '0000-00-00'
+	LEFT JOIN sym_vault1.Sat_ProductInstance_Closed C
+		ON A.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+WHERE C.PRODUCTINSTANCE_SQN IS NULL;
+
+/*
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+===================================================================
+*/
+/*
+	UpdateBlobSYMTransaction.sql
+
+	Michael McRae
+	July 11, 2014
+
+	Be sure to only run this once a day. It's baasically just a copy/slow build of all Transactions sent from SYM. Except...
+	I include a CATEGORY field to specify a Loan transaction or a Share transaction. This Table will also contain all comments which is nice because
+	currently I'm just ignoring those when I load Hub_Transaction
+*/
+
+
+INSERT INTO sym_vault1.Blob_SYM_Transaction(PARENTACCOUNT,
+ PARENTID, CATEGORY,
+ BALSEGCOUNT,
+ COMMENTCODE,
+ TRANSFERCODE,
+ ADJUSTMENTCODE,
+ REGECODE,
+ REGDCHECKCODE,
+ REGDTRANSFERCODE,
+ VOIDCODE,
+ SUBACTIONCODE,
+ SEQUENCENUMBER,
+ EFFECTIVEDATE,
+ POSTDATE,
+ POSTTIME,
+ USERNUMBER,
+ USEROVERRIDE,
+ SECURITYLEVELS,
+ DESCRIPTION,
+ ACTIONCODE,
+ SOURCECODE,
+ BALANCECHANGE,
+ INTEREST,
+ NEWBALANCE,
+ FEEAMOUNT,
+ ESCROWAMOUNT,
+ LASTTRANDATE,
+ MATURITYLOANDUEDATE,
+ COMMENT,
+ BRANCH,
+ CONSOLENUMBER,
+ BATCHSEQUENCE,
+ SALESTAXAMOUNT,
+ ACTIVITYDATE,
+ BILLEDFEEAMOUNT,
+ PROCESSORUSER,
+ MEMBERBRANCH,
+ PREVAVAILBALANCE,
+ SUBSOURCE,
+ CONFIRMATIONSEQ,
+ MICRACCTNUM,
+ MICRRT,
+ RECURRINGTRAN,
+ FEEEXMTCRTSYAMT,
+ ESCROWUNPAIDBALCHG,
+ ESCROWAPPLIEDBALCHG,
+ UNAPPLIEDPARTIALPMTCHG,
+ FEECOUNTBY,
+ LATECHGWAIVEDAMT,
+ LATECHGUNPAIDCHGAMT,
+ PREVLATECHGDATE,
+ PREVLATECHGACCRUED,
+ LATECHGFIELDSVALID,
+ BALSEGID1,
+ BALSEGPMTCHANGEDATE1,
+ INTEFFECTDATE,
+ BALSEGPREVFIRSTPMTDATE1)
+SELECT PARENTACCOUNT,
+ PARENTID, 'L' AS CATEGORY,
+ BALSEGCOUNT,
+ COMMENTCODE,
+ TRANSFERCODE,
+ ADJUSTMENTCODE,
+ REGECODE,
+ REGDCHECKCODE,
+ REGDTRANSFERCODE,
+ VOIDCODE,
+ SUBACTIONCODE,
+ SEQUENCENUMBER,
+ EFFECTIVEDATE,
+ POSTDATE,
+ POSTTIME,
+ USERNUMBER,
+ USEROVERRIDE,
+ SECURITYLEVELS,
+ DESCRIPTION,
+ ACTIONCODE,
+ SOURCECODE,
+ BALANCECHANGE,
+ INTEREST,
+ NEWBALANCE,
+ FEEAMOUNT,
+ ESCROWAMOUNT,
+ LASTTRANDATE,
+ MATURITYLOANDUEDATE,
+ COMMENT,
+ BRANCH,
+ CONSOLENUMBER,
+ BATCHSEQUENCE,
+ SALESTAXAMOUNT,
+ ACTIVITYDATE,
+ BILLEDFEEAMOUNT,
+ PROCESSORUSER,
+ MEMBERBRANCH,
+ PREVAVAILBALANCE,
+ SUBSOURCE,
+ CONFIRMATIONSEQ,
+ MICRACCTNUM,
+ MICRRT,
+ RECURRINGTRAN,
+ FEEEXMTCRTSYAMT,
+ ESCROWUNPAIDBALCHG,
+ ESCROWAPPLIEDBALCHG,
+ UNAPPLIEDPARTIALPMTCHG,
+ FEECOUNTBY,
+ LATECHGWAIVEDAMT,
+ LATECHGUNPAIDCHGAMT,
+ PREVLATECHGDATE,
+ PREVLATECHGACCRUED,
+ LATECHGFIELDSVALID,
+ BALSEGID1,
+ BALSEGPMTCHANGEDATE1,
+ INTEFFECTDATE,
+ BALSEGPREVFIRSTPMTDATE1
+FROM SYM.LOANTRANSACTION;
+	
+
+
+INSERT INTO sym_vault1.Blob_SYM_Transaction(PARENTACCOUNT,
+ PARENTID, CATEGORY,
+ BALSEGCOUNT,
+ COMMENTCODE,
+ TRANSFERCODE,
+ ADJUSTMENTCODE,
+ REGECODE,
+ REGDCHECKCODE,
+ REGDTRANSFERCODE,
+ VOIDCODE,
+ SUBACTIONCODE,
+ SEQUENCENUMBER,
+ EFFECTIVEDATE,
+ POSTDATE,
+ POSTTIME,
+ USERNUMBER,
+ USEROVERRIDE,
+ SECURITYLEVELS,
+ DESCRIPTION,
+ ACTIONCODE,
+ SOURCECODE,
+ BALANCECHANGE,
+ INTEREST,
+ NEWBALANCE,
+ FEEAMOUNT,
+ ESCROWAMOUNT,
+ LASTTRANDATE,
+ MATURITYLOANDUEDATE,
+ COMMENT,
+ BRANCH,
+ CONSOLENUMBER,
+ BATCHSEQUENCE,
+ SALESTAXAMOUNT,
+ ACTIVITYDATE,
+ BILLEDFEEAMOUNT,
+ PROCESSORUSER,
+ MEMBERBRANCH,
+ PREVAVAILBALANCE,
+ SUBSOURCE,
+ CONFIRMATIONSEQ,
+ MICRACCTNUM,
+ MICRRT,
+ RECURRINGTRAN,
+ FEEEXMTCRTSYAMT,
+ ESCROWUNPAIDBALCHG,
+ ESCROWAPPLIEDBALCHG,
+ UNAPPLIEDPARTIALPMTCHG,
+ FEECOUNTBY,
+ LATECHGWAIVEDAMT,
+ LATECHGUNPAIDCHGAMT,
+ PREVLATECHGDATE,
+ PREVLATECHGACCRUED,
+ LATECHGFIELDSVALID,
+ BALSEGID1,
+ BALSEGPMTCHANGEDATE1,
+ INTEFFECTDATE,
+ BALSEGPREVFIRSTPMTDATE1)
+SELECT PARENTACCOUNT,
+ PARENTID, 'S' AS CATEGORY,
+ BALSEGCOUNT,
+ COMMENTCODE,
+ TRANSFERCODE,
+ ADJUSTMENTCODE,
+ REGECODE,
+ REGDCHECKCODE,
+ REGDTRANSFERCODE,
+ VOIDCODE,
+ SUBACTIONCODE,
+ SEQUENCENUMBER,
+ EFFECTIVEDATE,
+ POSTDATE,
+ POSTTIME,
+ USERNUMBER,
+ USEROVERRIDE,
+ SECURITYLEVELS,
+ DESCRIPTION,
+ ACTIONCODE,
+ SOURCECODE,
+ BALANCECHANGE,
+ INTEREST,
+ NEWBALANCE,
+ FEEAMOUNT,
+ ESCROWAMOUNT,
+ LASTTRANDATE,
+ MATURITYLOANDUEDATE,
+ COMMENT,
+ BRANCH,
+ CONSOLENUMBER,
+ BATCHSEQUENCE,
+ SALESTAXAMOUNT,
+ ACTIVITYDATE,
+ BILLEDFEEAMOUNT,
+ PROCESSORUSER,
+ MEMBERBRANCH,
+ PREVAVAILBALANCE,
+ SUBSOURCE,
+ CONFIRMATIONSEQ,
+ MICRACCTNUM,
+ MICRRT,
+ RECURRINGTRAN,
+ FEEEXMTCRTSYAMT,
+ ESCROWUNPAIDBALCHG,
+ ESCROWAPPLIEDBALCHG,
+ UNAPPLIEDPARTIALPMTCHG,
+ FEECOUNTBY,
+ LATECHGWAIVEDAMT,
+ LATECHGUNPAIDCHGAMT,
+ PREVLATECHGDATE,
+ PREVLATECHGACCRUED,
+ LATECHGFIELDSVALID,
+ BALSEGID1,
+ BALSEGPMTCHANGEDATE1,
+ INTEFFECTDATE,
+ BALSEGPREVFIRSTPMTDATE1
+FROM SYM.SAVINGSTRANSACTION;
 
 END $$
 

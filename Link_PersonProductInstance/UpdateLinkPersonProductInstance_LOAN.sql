@@ -1,3 +1,6 @@
+
+
+
 /*
 	UpdateLinkPersonProductInstance_LOAN.sql
 
@@ -18,3 +21,4 @@ FROM sym_vault1.Hub_Person A
 	LEFT JOIN Link_Person_ProductInstance D
 		ON A.HUB_PERSON_SQN = D.PERSON_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = D.PRODUCTINSTANCE_SQN
 WHERE D.PERSON_SQN IS NULL AND D.PRODUCTINSTANCE_SQN IS NULL;
+
