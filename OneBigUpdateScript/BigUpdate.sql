@@ -88,6 +88,8 @@ WHERE C.CLOSEDATE <> '0000-00-00' AND A.END_DATE IS NULL;
 
 	NOTE - Does not select an address if it is all blank i.e. at least one of STREET,CITY,STATE,ZIPCODE must
 		contain some characters
+
+	As of July 15, only takes addresses from ORDINAL = 0 row of SYM.NAME i.e. only primary account holder's address
 */
 INSERT INTO sym_vault1.Hub_Address(STREET, CITY, STATE, ZIPCODE, HUB_ADDRESS_RSRC)
 SELECT DISTINCTROW A.STREET, A.CITY, A.STATE, A.ZIPCODE, 'EASE' AS HUB_ADDRESS_RSRC
@@ -351,6 +353,7 @@ WHERE F.PERSON_SQN IS NULL AND F.PRODUCTINSTANCE_SQN IS NULL;
 	The primary key of a unique LoanTransaction, and 'L' into Hub_Transaction. Left joins so it only adds those
 	not already in Hub_Transaction.
 */
+/*
 INSERT INTO sym_vault1.Hub_Transaction(PARENT_ACCT, ID, CATEGORY, SEQUENCE_NUM, POST_DATE, ACTIVITY_DATE, TELLER_NUM, CONSOLE_NUM, BRANCH, DESCRIPTION, ACTION_CODE, SOURCE_CODE,
 				BALANCE_CHANGE, INTEREST, NEW_BALANCE, HUB_TRANSACTION_RSRC)
 SELECT PARENTACCOUNT, PARENTID, 'L' AS CATEGORY, SEQUENCENUMBER, POSTDATE, ACTIVITYDATE, USERNUMBER, CONSOLENUMBER, A.BRANCH, A.DESCRIPTION, ACTIONCODE, SOURCECODE,
@@ -361,7 +364,7 @@ FROM SYM.LOANTRANSACTION A
 	LEFT JOIN sym_vault1.Hub_Transaction B
 		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.ID AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND B.CATEGORY = 'L'
 WHERE B.PARENT_ACCT IS NULL AND B.ID IS NULL AND B.SEQUENCE_NUM IS NULL AND A.COMMENTCODE = 0;
-
+*/
 
 /*
 	UpdateHubTransaction_SHARE.sql
@@ -373,6 +376,7 @@ WHERE B.PARENT_ACCT IS NULL AND B.ID IS NULL AND B.SEQUENCE_NUM IS NULL AND A.CO
 	The primary key of a unique SAVINGSTRANSACTION, and 'S' into Hub_Transaction. Left joins so it only adds those
 	not already in Hub_Transaction.
 */
+/*
 INSERT INTO sym_vault1.Hub_Transaction(PARENT_ACCT, ID, CATEGORY, SEQUENCE_NUM, POST_DATE, ACTIVITY_DATE, TELLER_NUM, CONSOLE_NUM, BRANCH, DESCRIPTION, ACTION_CODE, SOURCE_CODE,
 				BALANCE_CHANGE, INTEREST, NEW_BALANCE, HUB_TRANSACTION_RSRC)
 SELECT PARENTACCOUNT, PARENTID, 'S' AS CATEGORY, SEQUENCENUMBER, POSTDATE, ACTIVITYDATE, USERNUMBER, CONSOLENUMBER, A.BRANCH, A.DESCRIPTION, ACTIONCODE, SOURCECODE,
@@ -383,7 +387,7 @@ FROM SYM.SAVINGSTRANSACTION A
 	LEFT JOIN sym_vault1.Hub_Transaction B
 		ON A.PARENTACCOUNT = B.PARENT_ACCT AND A.PARENTID = B.ID AND A.SEQUENCENUMBER = B.SEQUENCE_NUM AND B.CATEGORY = 'S'
 WHERE B.PARENT_ACCT IS NULL AND B.ID IS NULL AND B.SEQUENCE_NUM IS NULL AND A.COMMENTCODE = 0;
-
+*/
 
 /*
 	UpdateHubTeller.sql
@@ -533,6 +537,104 @@ FROM sym_vault1.Hub_Product_Instance A
 		ON A.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
 WHERE C.PRODUCTINSTANCE_SQN IS NULL;
 
+
+/*
+	Update_LinkBranchTransaction.sql
+	
+	Michael McRae
+	July 21, 2014
+
+	Connects a Branch to a Transaction by connecting Branch_SQN to Transaction_SQN from
+	Hub_Branch and Hub_Transaction. This can help identify foot-traffic, and ATM usage. 
+	
+	Transactions with BRANCH = 0 can be a variety of things, but with TELLER_NUM = 898 it is either ATM usage
+	or Card usage or ?something else?
+*/
+INSERT INTO sym_vault1.Link_Branch_Transaction(BRANCH_SQN, TRANSACTION_SQN, LINK_BRANCH_TRANSACTION_RSRC)
+SELECT A.HUB_BRANCH_SQN, B.HUB_TRANSACTION_SQN, 'EASE' AS LINK_BRANCH_TRANSACTION_RSRC
+FROM sym_vault1.Hub_Branch A
+	JOIN sym_vault1.Hub_Transaction B
+		ON A.BRANCH_NUM = B.BRANCH
+	LEFT JOIN sym_vault1.Link_Branch_Transaction C
+		ON A.HUB_BRANCH_SQN = C.BRANCH_SQN AND B.HUB_TRANSACTION_SQN = C.TRANSACTION_SQN
+WHERE C.BRANCH_SQN IS NULL AND C.TRANSACTION_SQN IS NULL;
+
+
+/*
+	UpdateHubHomePhoneNum.sql
+
+	Michael McRae
+	July 21, 2014
+
+	Selects DISTINCT home phone numbers from SYM.NAME and inserts them into Hub_Home_Phone if
+	they are not already in the table.
+*/
+INSERT INTO Hub_Home_Phone(NUMBER, HUB_HOME_PHONE_RSRC)
+SELECT DISTINCT A.HOMEPHONE, 'EASE' AS HUB_HOME_PHONE_RSRC
+FROM SYM.NAME A
+	LEFT JOIN Hub_Home_Phone B
+		ON A.HOMEPHONE = B.NUMBER
+WHERE B.NUMBER IS NULL AND A.HOMEPHONE <> '';
+
+
+/*
+	UpdateHubCard.sql
+
+	Michael McRae
+	July 21, 2014
+
+	Takes primary key from SYM.CARD {Parentaccount, Ordinal} and inserts into Hub_Card. Left joins with
+	Sat_ProductInstance_Closed so that it only selects those with Parentaccount NOT closed.
+*/
+INSERT INTO Hub_Card(PARENT_ACCT, ORDINAL, NUMBER, SAV_ID, CHK_ID, CREDIT_ID, HUB_CARD_RSRC)
+SELECT DISTINCTROW A.PARENTACCOUNT, A.ORDINAL, A.NUMBER, A.SAVID, A.CHKID, A.CREDITCARDID, 'EASE' AS HUB_CARD_RSRC
+FROM SYM.CARD A
+	JOIN Hub_Product_Instance B
+		ON A.PARENTACCOUNT = B.PARENT_ACCT
+	LEFT JOIN Sat_ProductInstance_Closed C
+		ON B.HUB_PRODUCT_INSTANCE_SQN = C.PRODUCTINSTANCE_SQN
+	LEFT JOIN Hub_Card D
+		ON A.PARENTACCOUNT = D.PARENT_ACCT AND A.ORDINAL = D.ORDINAL
+WHERE STATUS = 1 AND D.PARENT_ACCT IS NULL AND D.ORDINAL IS NULL
+		AND C.PRODUCTINSTANCE_SQN IS NULL;
+
+
+/*
+	UpdateSatCardStatus.sql
+
+	Michael McRae
+	July 21, 2014
+
+	Updates Sat_Card_Status:
+	1. Adds reference, status when a new Card appears into Hub_Card from SYM.CARD
+	2. Inserts new row when the status of a Card changes {shown in SYM.NAME}
+	3. Updates END_DATE = NOW() for previous Status of a card.
+*/
+INSERT INTO Sat_Card_Status(CARD_SQN, STATUS)
+SELECT A.HUB_CARD_SQN, B.STATUS
+FROM Hub_Card A
+	JOIN SYM.CARD B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ORDINAL = B.ORDINAL
+	LEFT JOIN Sat_Card_Status C
+		ON A.HUB_CARD_SQN = C.CARD_SQN
+WHERE C.CARD_SQN IS NULL;
+
+INSERT INTO Sat_Card_Status(CARD_SQN, STATUS)
+SELECT A.HUB_CARD_SQN, B.STATUS
+FROM Hub_Card A
+	JOIN SYM.CARD B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ORDINAL = B.ORDINAL
+	JOIN Sat_Card_Status C
+		ON A.HUB_CARD_SQN = C.CARD_SQN
+WHERE C.STATUS <> B.STATUS;
+
+UPDATE Sat_Card_Status A
+	JOIN Hub_Card B
+		ON A.CARD_SQN = B.HUB_CARD_SQN
+	JOIN SYM.CARD C
+		ON B.PARENT_ACCT = C.PARENTACCOUNT AND B.ORDINAL = C.ORDINAL
+SET A.END_DATE = NOW()
+WHERE A.STATUS <> C.STATUS AND A.END_DATE IS NULL;
 /*
 \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 

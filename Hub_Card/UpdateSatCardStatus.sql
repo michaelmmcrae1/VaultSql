@@ -1,0 +1,37 @@
+/*
+	UpdateSatCardStatus.sql
+
+	Michael McRae
+	July 21, 2014
+
+	Updates Sat_Card_Status:
+	1. Adds reference, status when a new Card appears in Hub_Card
+	2. Inserts new row when the status of a Card changes {shown in SYM.NAME}
+	3. Updates END_DATE = NOW() for previous Status of a card.
+*/
+INSERT INTO Sat_Card_Status(CARD_SQN, STATUS)
+SELECT A.HUB_CARD_SQN, B.STATUS
+FROM Hub_Card A
+	JOIN SYM.CARD B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ORDINAL = B.ORDINAL
+	LEFT JOIN Sat_Card_Status C
+		ON A.HUB_CARD_SQN = C.CARD_SQN
+WHERE C.CARD_SQN IS NULL;
+
+INSERT INTO Sat_Card_Status(CARD_SQN, STATUS)
+SELECT A.HUB_CARD_SQN, B.STATUS
+FROM Hub_Card A
+	JOIN SYM.CARD B
+		ON A.PARENT_ACCT = B.PARENTACCOUNT AND A.ORDINAL = B.ORDINAL
+	JOIN Sat_Card_Status C
+		ON A.HUB_CARD_SQN = C.CARD_SQN
+WHERE C.STATUS <> B.STATUS;
+
+UPDATE Sat_Card_Status A
+	JOIN Hub_Card B
+		ON A.CARD_SQN = B.HUB_CARD_SQN
+	JOIN SYM.CARD C
+		ON B.PARENT_ACCT = C.PARENTACCOUNT AND B.ORDINAL = C.ORDINAL
+SET A.END_DATE = NOW()
+WHERE A.STATUS <> C.STATUS AND A.END_DATE IS NULL;
+	
