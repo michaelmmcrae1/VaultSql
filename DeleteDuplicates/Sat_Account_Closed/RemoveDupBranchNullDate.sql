@@ -1,0 +1,13 @@
+/*
+	RemoveDupBranchNullDate.sql
+
+	Michael McRae
+	July 25, 2014
+
+	
+*/
+DELETE A
+FROM Sat_Account_Closed A
+	JOIN Sat_Account_Closed B
+		ON A.HUB_ACCT_SQN = B.HUB_ACCT_SQN AND A.BRANCH = B.BRANCH
+WHERE A.END_DATE IS NULL AND A.SAT_ACCT_CLOSED_SQN > B.SAT_ACCT_CLOSED_SQN
