@@ -1,0 +1,10 @@
+/*
+	DelDupCardStatusNULLEndDate.sql
+
+	Delets rows from Sat_Card_Status that have duplicate
+	HUB_CARD_SQN, STATUS, AND END_DATE IS NULL
+*/
+DELETE A FROM Sat_Card_Status A
+	JOIN Sat_Card_Status B
+		ON A.HUB_CARD_SQN = B.HUB_CARD_SQN AND A.STATUS = B.STATUS
+WHERE A.END_DATE IS NULL AND B.END_DATE IS NULL AND A.SAT_CARD_STATUS_SQN > B.SAT_CARD_STATUS_SQN

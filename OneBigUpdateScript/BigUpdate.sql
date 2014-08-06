@@ -1,3 +1,5 @@
+
+
 /*
 	UpdateHubAccount.sql
 
@@ -267,8 +269,8 @@ WHERE D.HUB_ADDR_SQN IS NULL AND D.HUB_PERSON_SQN IS NULL;
 	Because these Product Instances will only be from SYM.SAVINGS -- which is a share. Needs CATEGORY
 	for 'SHARE' because product instances from SYM.LOAN may have the same Parentaccount,ID
 */
-INSERT INTO sym_vault1.Hub_Product_Instance(PARENT_ACCT, ID, CATEGORY, HUB_PRODUCT_INSTANCE_RSRC)
-SELECT B.PARENTACCOUNT, B.ID, 'S' AS CATEGORY, 'EASE' AS HUB_PRODUCT_INSTANCE_RSRC
+INSERT INTO sym_vault1.Hub_Product_Instance(PARENT_ACCT, ID, CATEGORY, OPEN_DATE, HUB_PRODUCT_INSTANCE_RSRC)
+SELECT B.PARENTACCOUNT, B.ID, 'S' AS CATEGORY, B.OPENDATE, 'EASE' AS HUB_PRODUCT_INSTANCE_RSRC
 FROM sym_vault1.Hub_Account A
 	JOIN SYM.SAVINGS B
 		ON A.ACCT_NUM = B.PARENTACCOUNT
