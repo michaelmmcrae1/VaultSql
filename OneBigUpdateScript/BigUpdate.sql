@@ -310,7 +310,7 @@ WHERE C.PARENT_ACCT IS NULL AND C.ID IS NULL AND C.CATEGORY IS NULL;
 	so we are only looking at addresses of primary account holder.
 */
 INSERT INTO sym_vault1.Link_Addr_ProductInstance(HUB_ADDR_SQN, HUB_PRODUCT_INSTANCE_SQN, LINK_ADDR_PRODUCTINSTANCE_RSRC)
-SELECT C.HUB_ADDR_SQN, A.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_ADDR_PRODUCTINSTANCE_RSRC
+SELECT DISTINCT C.HUB_ADDR_SQN, A.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_ADDR_PRODUCTINSTANCE_RSRC
 FROM sym_vault1.Hub_Product_Instance A
 	JOIN SYM.NAME B
 		ON A.PARENT_ACCT = B.PARENTACCOUNT AND B.ORDINAL = 0
@@ -377,7 +377,7 @@ WHERE D.HUB_PRODUCT_SQN IS NULL AND D.HUB_PRODUCT_INSTANCE_SQN IS NULL;
 	connecting certain kinds of connected people? (i.e. joint, spouse, etc.)
 */
 INSERT INTO sym_vault1.Link_Person_ProductInstance(HUB_PERSON_SQN, HUB_PRODUCT_INSTANCE_SQN, LINK_PERSON_PRODUCTINSTANCE_RSRC)
-SELECT A.HUB_PERSON_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
+SELECT DISTINCT A.HUB_PERSON_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
 FROM sym_vault1.Hub_Person A
 	JOIN SYM.NAME B
 		ON A.SSN = B.SSN
@@ -698,7 +698,7 @@ WHERE A.STATUS <> C.STATUS AND A.END_DATE IS NULL;
 	=============================================================================
 	=============================================================================
 	=============================================================================
-	These two Transaction Updates should only run after the Java program which handles Transactions +
+	These three Link_ Transaction Updates should only run after the Java program which handles Transactions +
 	Comments has already run
 */
 
