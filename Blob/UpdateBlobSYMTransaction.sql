@@ -9,7 +9,6 @@
 	currently I'm just ignoring those when I load Hub_Transaction
 */
 
-
 INSERT INTO sym_vault1.Blob_SYM_Transaction(PARENTACCOUNT,
  PARENTID, CATEGORY,
  BALSEGCOUNT,

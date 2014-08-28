@@ -1,0 +1,36 @@
+/*
+	UpdateSatAcctName.sql
+	
+	Michael McRae
+	August 25, 2014
+
+	Keeps track of the FIRST,MIDDLE,LAST of Primary Account holder in SYM.NAME for each Account.
+*/
+-- Add Acct_Num, Name Of Account which is not currently in Sat
+INSERT INTO sym_vault2.S_Account_Name(H_ACCT_SQN, TITLE, FIRST, MIDDLE, LAST, SUFFIX)
+SELECT B.H_ACCT_SQN, A.TITLE, A.FIRST, A.MIDDLE, A.LAST, A.SUFFIX
+FROM SYM.NAME A
+	JOIN sym_vault2.H_Account B
+		ON A.PARENTACCOUNT = B.ACCT_NUM AND A.ORDINAL = 0
+	LEFT JOIN sym_vault2.S_Account_Name C
+		ON B.H_ACCT_SQN = C.H_ACCT_SQN
+WHERE C.H_ACCT_SQN IS NULL;
+-- Add new Name of Account
+INSERT INTO sym_vault2.S_Account_Name(H_ACCT_SQN, TITLE, FIRST, MIDDLE, LAST, SUFFIX)
+SELECT B.H_ACCT_SQN, A.TITLE, A.FIRST, A.MIDDLE, A.LAST, A.SUFFIX
+FROM SYM.NAME A
+	JOIN sym_vault2.H_Account B
+		ON A.PARENTACCOUNT = B.ACCT_NUM AND A.ORDINAL = 0
+	JOIN sym_vault2.S_Account_Name C
+		ON B.H_ACCT_SQN = C.H_ACCT_SQN
+WHERE (A.TITLE <> C.TITLE OR A.FIRST <> C.FIRST OR A.MIDDLE <> C.MIDDLE OR A.LAST <> C.LAST
+			OR A.SUFFIX <> C.SUFFIX) AND C.END_DATE IS NULL;
+-- set END_DATE = NOW() for out-of-date Name for Account
+UPDATE sym_vault2.S_Account_Name A
+	JOIN sym_vault2.H_Account B
+		ON A.H_ACCT_SQN = B.H_ACCT_SQN
+	JOIN SYM.NAME C
+		ON B.ACCT_NUM = C.PARENTACCOUNT AND C.ORDINAL = 0
+SET END_DATE = NOW()
+WHERE (A.TITLE <> C.TITLE OR A.FIRST <> C.FIRST OR A.MIDDLE <> C.MIDDLE OR A.LAST <> C.LAST
+			OR A.SUFFIX <> C.SUFFIX) AND A.END_DATE IS NULL;

@@ -1,4 +1,7 @@
-START TRANSACTION;
+/*
+	BigHubUpdate.sql
+*/
+
 
 /*
 	UpdateHubAccount.sql
@@ -70,12 +73,15 @@ WHERE C.BRANCH <> A.BRANCH AND A.END_DATE IS NULL;
 	To update the closedate of those Accounts which are closed.
 */
 UPDATE sym_vault1.Sat_Account_Closed A
-	INNER JOIN sym_vault1.Hub_Account B
+	JOIN sym_vault1.Hub_Account B
 		ON A.HUB_ACCT_SQN = B.HUB_ACCT_SQN
-	INNER JOIN SYM.ACCOUNT C
+	JOIN SYM.ACCOUNT C
 		ON B.ACCT_NUM = C.ACCOUNTNUMBER
 SET END_DATE = C.CLOSEDATE
 WHERE C.CLOSEDATE <> '0000-00-00' AND A.END_DATE IS NULL;
+/*
+	Entered 330 rows multiple days? Repeatedly closing certain Accounts?
+*/
 
 /*
 	UpdateSatAcctType.sql
@@ -163,7 +169,7 @@ FROM SYM.NAME A
 		ON A.PARENTACCOUNT = B.ACCT_NUM
 	LEFT JOIN sym_vault1.Hub_Person D
 		ON A.SSN = D.SSN
-WHERE A.SSN <> '' AND A.SSN <> '000000000' AND A.SSN <> '111111111' AND A.SSN <> '222222222' AND A.ORDINAL = 0
+WHERE A.SSN <> '' AND A.SSN <> '000000000' AND A.SSN <> '111111111' AND A.ORDINAL = 0
 		AND D.SSN IS NULL;
 /*
 	UpdateSatPersonName.sql
@@ -185,11 +191,11 @@ SELECT DISTINCTROW A.HUB_PERSON_SQN, B.TITLE, B.FIRST, B.MIDDLE, B.LAST, B.SUFFI
 FROM sym_vault1.Hub_Person A
 	JOIN SYM.NAME B
 		ON A.SSN = B.SSN
-	JOIN sym_vault1.Hub_Account C
-		ON B.PARENTACCOUNT = C.ACCT_NUM
-	LEFT JOIN sym_vault1.Sat_Person_Name D
-		ON A.HUB_PERSON_SQN = D.HUB_PERSON_SQN
-WHERE D.HUB_PERSON_SQN IS NULL AND B.ORDINAL = 0;
+	LEFT JOIN sym_vault1.Sat_Person_Name C
+		ON A.HUB_PERSON_SQN = C.HUB_PERSON_SQN
+	JOIN sym_vault1.Hub_Account D
+		ON B.PARENTACCOUNT = D.ACCT_NUM
+WHERE C.HUB_PERSON_SQN IS NULL AND B.ORDINAL = 0;
 
 
 /*
@@ -446,261 +452,3 @@ UPDATE Sat_Card_Status A
 		ON B.PARENT_ACCT = C.PARENTACCOUNT AND B.ORDINAL = C.ORDINAL
 SET A.END_DATE = NOW()
 WHERE A.STATUS <> C.STATUS AND A.END_DATE IS NULL;
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
-	Begin Link updates
-*/
-
-
-
-
-
-
-
-/*
-	UpdateLinkAcctPerson_WORKING.sql
-
-	Michael McRae
-	June 23, 2014
-
-	Joins Hub_Account, NAME, Hub_Person with SSN and Account Number. Shows a relationship between
-	an Account and an Individual. One individual may have multiple accounts, and one account may have
-	multiple individuals.
-*/
-INSERT INTO sym_vault1.Link_Acct_Person(HUB_ACCT_SQN, HUB_PERSON_SQN, LINK_ACCT_PERSON_RSRC)
-SELECT DISTINCTROW A.HUB_ACCT_SQN, C.HUB_PERSON_SQN, 'EASE' AS LINK_ACCT_PERSON_RSRC
-FROM sym_vault1.Hub_Account A
-	JOIN SYM.NAME B
-		ON A.ACCT_NUM = B.PARENTACCOUNT
-	JOIN sym_vault1.Hub_Person C
-		ON B.SSN = C.SSN
-	LEFT JOIN sym_vault1.Link_Acct_Person D
-		ON A.HUB_ACCT_SQN = D.HUB_ACCT_SQN AND C.HUB_PERSON_SQN = D.HUB_PERSON_SQN
-WHERE D.HUB_ACCT_SQN IS NULL AND D.HUB_PERSON_SQN IS NULL AND B.ORDINAL = 0;
-
-
-/*
-	Combined_UpdateLinkSatAcctAddr.sql
-
-	Michael McRae
-	August 19, 2014
-	
-	Rework of UpdateLinkAcctAddr_WORKING.sql
-	This must run *after* Hub_Account and Hub_Address and Hub_Person have all been updated.
-
-	A connection of HUB_ACCT_SQN and HUB_ADDR_SQN is inserted if one of the following is true:
-		1. There is no reference to the Hub_Acct_SQN in the Link yet
-		2. The current/effective Link for that HUB_ACCT_SQN is connected to a different HUB_ADDR_SQN
-*/
-INSERT INTO sym_vault1.Link_Acct_Addr(HUB_ACCT_SQN, HUB_ADDR_SQN, LINK_ACCT_ADDR_RSRC)
-SELECT DISTINCTROW C.HUB_ACCT_SQN, B.HUB_ADDR_SQN, 'EASE' AS LINK_ACCT_ADDR_RSRC
-FROM SYM.NAME A
-	JOIN sym_vault1.Hub_Address B
-		ON A.STREET = B.STREET AND A.CITY = B.CITY AND A.STATE = B.STATE AND A.ZIPCODE = B.ZIPCODE
-	JOIN sym_vault1.Hub_Account C
-		ON A.PARENTACCOUNT = C.ACCT_NUM
-	LEFT JOIN sym_vault1.Link_Acct_Addr D
-		ON C.HUB_ACCT_SQN = D.HUB_ACCT_SQN
-	LEFT JOIN sym_vault1.Sat_LinkAcctAddr_Effectivity E
-		ON D.LINK_ACCT_ADDR_SQN = E.LINK_ACCT_ADDR_SQN
-WHERE (D.HUB_ACCT_SQN IS NULL OR (E.END_DATE IS NULL AND B.HUB_ADDR_SQN <> D.HUB_ADDR_SQN)) AND A.ORDINAL = 0;
-/*
-	UpdateSatLinkAcctAddr_Effectivity.sql
-
-	Michael McRae
-	August 19, 2014
-	
-	Hub_Acct_SQN is the driving key in this Link for detecting
-	new Links.
-
-	A row in Link is only added if an Account's Address is different
-	from the current/effective Link between an Account and Address.
-
-	Insert into Satellite the LinkAcctAddr_SQN for that Link for any
-	Links not already in Satellite(thus getting the Link which was added
-	due to being different from the Account's current Link).
-
-	After any new Links are added to the Sat, set the END_DATE
-	for current/effective Links which are no longer current i.e.
-	their Hub_Addr_SQN refers to an Address in Hub_Address which
-	is no longer the Address in SYM.NAME.
-*/
-/*
-	If this is the first time we're seeing this Link, insert it into
-	the Satellite.
-*/
-INSERT INTO sym_vault1.Sat_LinkAcctAddr_Effectivity(LINK_ACCT_ADDR_SQN)
-SELECT A.LINK_ACCT_ADDR_SQN
-FROM sym_vault1.Link_Acct_Addr A
-	LEFT JOIN sym_vault1.Sat_LinkAcctAddr_Effectivity B
-		ON A.LINK_ACCT_ADDR_SQN = B.LINK_ACCT_ADDR_SQN
-WHERE B.LINK_ACCT_ADDR_SQN IS NULL;
-/*
-	Update the End Date in Sat for Links which are no longer current
-*/
-UPDATE sym_vault1.Sat_LinkAcctAddr_Effectivity A
-	JOIN sym_vault1.Link_Acct_Addr B
-		ON A.LINK_ACCT_ADDR_SQN = B.LINK_ACCT_ADDR_SQN
-	JOIN sym_vault1.Hub_Account C
-		ON B.HUB_ACCT_SQN = C.HUB_ACCT_SQN
-	JOIN sym_vault1.Hub_Address D
-		ON B.HUB_ADDR_SQN = D.HUB_ADDR_SQN
-	JOIN SYM.NAME E
-		ON C.ACCT_NUM = E.PARENTACCOUNT
-SET END_DATE = NOW()
-WHERE A.END_DATE IS NULL AND (D.STREET <> E.STREET OR D.CITY <> E.CITY OR D.STATE <> E.STATE)
-		AND E.ORDINAL = 0;
-
-
-/*
-	Rework_UpdateProductProductInstance.sql
-	
-	Michael McRae
-	August 20, 2014
-	
-	Creates a link between an instance of a Product, and a Product. Useful to see what type of Product
-	a Product Instance is, or to see how many of a given Product there are. Utilizes Sat_ProductInstance_Type
-	to connect a Product Instance to a Product.
-	
-	*NOTE*
-	Doesn't use any SYM tables. Needs Hub_Product and Hub_ProductInstance + Satellites to be updated first.
-	At some point this could be like Link_Acct_Addr where it utilizes an Effectivity Satellite, because
-	A ProductInstance can be of a certain Product at one point but change types (maybe?).
-*/
-INSERT INTO sym_vault1.Link_Product_ProductInstance(HUB_PRODUCT_SQN, HUB_PRODUCT_INSTANCE_SQN, LINK_PRODUCT_PRODUCTINSTANCE_RSRC)
-SELECT A.HUB_PRODUCT_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
-FROM sym_vault1.Hub_Product A
-	JOIN sym_vault1.Hub_Product_Instance B
-		ON A.CATEGORY = B.CATEGORY
-	JOIN sym_vault1.Sat_ProductInstance_Type C
-		ON B.HUB_PRODUCT_INSTANCE_SQN = C.HUB_PRODUCT_INSTANCE_SQN
-	LEFT JOIN Link_Product_ProductInstance D
-		ON A.HUB_PRODUCT_SQN = D.HUB_PRODUCT_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = D.HUB_PRODUCT_INSTANCE_SQN
-WHERE D.HUB_PRODUCT_SQN IS NULL AND D.HUB_PRODUCT_INSTANCE_SQN IS NULL AND C.END_DATE IS NULL
-		AND A.TYPE = C.TYPE;
-
-
-/*
-	UpdateLinkPersonProductInstance.sql
-
-	Michael McRae
-	August 13, 2014
-
-	Links Primary Account holders to all ProductInstances on that Account
-
-	Does NOT bother with Trustees, beneficiaries; only connects Hub_Person SSNs to a ProductInstance
-	and Hub_Person only contains SSN's from SYM.NAME WHERE ORDINAL = 0 {Primary Account Holder}
-
-	Still need ORDINAL = 0 here in case someone is Primary on one account, but then is on another account
-	as a Joint, Trustee or something. We just want that Account# where they are Primary to link to
-	ParentAccount of ProductInstance
-*/
-INSERT INTO sym_vault1.Link_Person_ProductInstance(HUB_PERSON_SQN, HUB_PRODUCT_INSTANCE_SQN, LINK_PERSON_PRODUCTINSTANCE_RSRC)
-SELECT DISTINCT A.HUB_PERSON_SQN, C.HUB_PRODUCT_INSTANCE_SQN, 'EASE' AS LINK_PRODUCT_PRODUCTINSTANCE_RSRC
-FROM sym_vault1.Hub_Person A
-	JOIN SYM.NAME B
-		ON A.SSN = B.SSN
-	JOIN sym_vault1.Hub_Product_Instance C
-		ON B.PARENTACCOUNT = C.PARENT_ACCT
-	LEFT JOIN Link_Person_ProductInstance D
-		ON A.HUB_PERSON_SQN = D.HUB_PERSON_SQN AND C.HUB_PRODUCT_INSTANCE_SQN = D.HUB_PRODUCT_INSTANCE_SQN
-WHERE D.HUB_PERSON_SQN IS NULL AND D.HUB_PRODUCT_INSTANCE_SQN IS NULL AND B.ORDINAL = 0;
-
-
-
-
-/*
-	=============================================================================
-	=============================================================================
-	=============================================================================
-	=============================================================================
-	These three Link_ Transaction Updates should only run after the Java program which handles Transactions +
-	Comments has already run
-*/
-/*
-	UpdateLinkTransactionComment.sql
-
-	Michael McRae
-	July 25, 2014
-
-	Combines a Transaction from Hub_Transaction and a Transaction Comment from Hub_Transaction_Comment
-	Connects them on HUB_TRANSACTION_SQN.
-	It is a 1 to Many relationship with one HUB_TRANSACTION_SQN having multiple Comments, but one each comment only connects
-	to 1 Transaction.
-*/
-INSERT INTO Link_Transaction_Comment(HUB_TRANSACTION_SQN, HUB_TRANSACTION_COMMENT_SQN, LINK_TRANSACTION_COMMENT_RSRC)
-SELECT
-	A.HUB_TRANSACTION_SQN, B.HUB_TRANSACTION_COMMENT_SQN, 'EASE'
-FROM Hub_Transaction A
-	JOIN Hub_Transaction_Comment B
-		ON A.HUB_TRANSACTION_SQN = B.HUB_TRANSACTION_SQN
-	LEFT JOIN Link_Transaction_Comment C
-		ON A.HUB_TRANSACTION_SQN = C.HUB_TRANSACTION_SQN AND B.HUB_TRANSACTION_COMMENT_SQN = C.HUB_TRANSACTION_COMMENT_SQN
-WHERE C.HUB_TRANSACTION_SQN IS NULL AND C.HUB_TRANSACTION_COMMENT_SQN IS NULL;
-
-
-/*
-	Update_LinkBranchTransaction.sql
-	
-	Michael McRae
-	July 21, 2014
-
-	Connects a Branch to a Transaction by connecting Branch_SQN to Transaction_SQN from
-	Hub_Branch and Hub_Transaction. This can help identify foot-traffic, and ATM usage. 
-	
-	Transactions with BRANCH = 0 can be a variety of things, but with TELLER_NUM = 898 it is either ATM usage
-	or Card usage or ?something else?
-*/
-INSERT INTO sym_vault1.Link_Branch_Transaction(HUB_BRANCH_SQN, HUB_TRANSACTION_SQN, LINK_BRANCH_TRANSACTION_RSRC)
-SELECT A.HUB_BRANCH_SQN, B.HUB_TRANSACTION_SQN, 'EASE' AS LINK_BRANCH_TRANSACTION_RSRC
-FROM sym_vault1.Hub_Branch A
-	JOIN sym_vault1.Hub_Transaction B
-		ON A.BRANCH_NUM = B.BRANCH
-	LEFT JOIN sym_vault1.Link_Branch_Transaction C
-		ON A.HUB_BRANCH_SQN = C.HUB_BRANCH_SQN AND B.HUB_TRANSACTION_SQN = C.HUB_TRANSACTION_SQN
-WHERE C.HUB_BRANCH_SQN IS NULL AND C.HUB_TRANSACTION_SQN IS NULL;
-
-
-/*
-	UpdateLinkPersonTransaction.sql
-
-	Michael McRae
-	July 29, 2014
-
-	This update depends on Link_Person_ProductInstance having captured an
-	accurate relationship between Person and ProductInstance
-
-	Connects a Transaction to a ProductInstance then Connects, through Link_Person_
-	ProductInstance, to a Person_SQN. This will work as long as the correct people are
-	connected to each share, and each loan i.e. as long as Link_Person_ProductInstance is correct.
-
-	NOTE - all people on an Account are connected to a Share on that Account, but not
-		necessarily the case for Loans on that Account.
-	Takes ~60 sec...
-*/
-INSERT INTO sym_vault1.Link_Person_Transaction(HUB_PERSON_SQN, HUB_TRANSACTION_SQN, LINK_PERSON_TRANSACTION_RSRC)
-SELECT
-	C.HUB_PERSON_SQN, A.HUB_TRANSACTION_SQN, 'EASE'
-FROM sym_vault1.Hub_Transaction A
-	JOIN sym_vault1.Hub_Product_Instance B
-		ON A.PARENT_ACCT = B.PARENT_ACCT AND A.ID = B.ID AND A.CATEGORY = B.CATEGORY
-	JOIN sym_vault1.Link_Person_ProductInstance C
-		ON B.HUB_PRODUCT_INSTANCE_SQN = C.HUB_PRODUCT_INSTANCE_SQN
-	LEFT JOIN sym_vault1.Link_Person_Transaction D
-		ON C.HUB_PERSON_SQN = D.HUB_PERSON_SQN AND A.HUB_TRANSACTION_SQN = D.HUB_TRANSACTION_SQN
-WHERE D.HUB_PERSON_SQN IS NULL AND D.HUB_TRANSACTION_SQN IS NULL;
-
-
-COMMIT;
